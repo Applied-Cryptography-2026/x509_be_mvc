@@ -1,0 +1,40 @@
+database:
+  user: root
+  password: Phu050912
+  net: tcp
+  addr: 127.0.0.1:4001
+  dbname: x509
+  allowNativePasswords: true
+  params:
+    parseTime: "true"
+
+server:
+  address: "8080"
+  mode: debug
+
+pki:
+  default_validity_days: 365
+  default_key_bits: 2048
+  default_profile: tls-server
+  allowed_profiles:
+    - tls-server
+    - tls-client
+    - code-signing
+    - smime
+    - ca
+  default_key_usage:
+    - digitalSignature
+    - keyEncipherment
+  default_ext_key_usage:
+    - serverAuth
+    - clientAuth
+  ca_common_name: "My Internal CA"
+  ca_organization: "My Organization"
+  crl_url: "http://localhost:8080/crl"
+  ocsp_url: "http://localhost:8080/ocsp"
+
+app:
+  env: development
+  notify_days: 30
+  storage_dir: ./certs
+  private_key_pass: ""

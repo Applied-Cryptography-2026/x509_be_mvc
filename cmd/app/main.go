@@ -33,6 +33,11 @@ func main() {
 	// 3. Build the DI composition root
 	ac := buildAppController(database)
 
+	// 3b. Auto-create Root CA if it doesn't exist
+	if err := ac.CA.EnsureCA(); err != nil {
+		log.Fatalln("app: failed to ensure Root CA:", err)
+	}
+
 	// 4. Bootstrap Echo HTTP framework
 	e := echo.New()
 
@@ -57,6 +62,8 @@ func buildAppController(database *gorm.DB) router.AppController {
 	csrRepo := repositories.NewCSRRepository(database)
 	authRepo := repositories.NewAuthRepository(database)
 	dbRepo := repositories.NewDBRepository(database)
+	keyPairRepo := repositories.NewKeyPairRepository(database)
+	revokeRepo := repositories.NewRevocationRequestRepository(database)
 
 	// ─── Services ──────────────────────────────────────────────────────────────
 	converter := services.NewConverter()
@@ -64,7 +71,10 @@ func buildAppController(database *gorm.DB) router.AppController {
 	certSvc := services.NewCertificateService(
 		certRepo, dbRepo, converter,
 	)
-	csrSvc := services.NewCSRService(csrRepo, dbRepo)
+
+	caSvc := services.NewCAService(certRepo)
+	caCtrl := controllers.NewCAController(caSvc)
+	csrSvc := services.NewCSRService(csrRepo, certRepo, caSvc, keyPairRepo)
 
 	tokenCfg := services.JWTConfig{
 		AccessTokenSecret:  config.C.JWT.AccessTokenSecret,
@@ -79,6 +89,15 @@ func buildAppController(database *gorm.DB) router.AppController {
 	customerAuthSvc := services.NewCustomerAuthService(authRepo, tokenSvc, hasher)
 	adminAuthSvc := services.NewAdminAuthService(authRepo, tokenSvc, hasher)
 
+	keyPairSvc := services.NewKeyPairService(keyPairRepo)
+	keyPairCtrl := controllers.NewKeyPairController(keyPairSvc)
+
+	revokeSvc := services.NewRevocationRequestService(revokeRepo, certRepo, authRepo)
+	revokeCtrl := controllers.NewRevocationRequestController(revokeSvc)
+
+	crlSvc := services.NewCRLService(certRepo, keyPairRepo)
+	crlCtrl := controllers.NewCRLController(crlSvc)
+
 	// ─── Controllers ───────────────────────────────────────────────────────────
 	certCtrl := controllers.NewCertificateController(certSvc)
 	csrCtrl := controllers.NewCSRController(csrSvc)
@@ -86,10 +105,14 @@ func buildAppController(database *gorm.DB) router.AppController {
 	adminCtrl := controllers.NewAdminController(adminAuthSvc)
 
 	return router.AppController{
-		Certificate: certCtrl,
-		CSR:         csrCtrl,
-		Auth:        authCtrl,
-		Admin:       adminCtrl,
+		Certificate:       certCtrl,
+		CSR:               csrCtrl,
+		Auth:              authCtrl,
+		Admin:             adminCtrl,
+		CA:                caCtrl,
+		KeyPair:           keyPairCtrl,
+		RevocationRequest: revokeCtrl,
+		CRL:               crlCtrl,
 	}
 }
 

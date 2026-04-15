@@ -78,14 +78,24 @@ func (s *CustomerAuthService) Login(username, password string) (accessToken stri
 	return s.issueTokenPair(user)
 }
 
-// Refresh rotates a customer refresh token and issues a new pair.
+// Refresh validates the refresh token and issues a new access token without rotation.
 func (s *CustomerAuthService) Refresh(refreshToken string) (string, string, time.Time, error) {
-	return s.rotateRefreshToken(refreshToken)
+	return refreshAccessTokenWithoutRotation(s.authRepo, s.tokenSvc, refreshToken)
 }
 
 // Logout invalidates all refresh tokens for the given customer.
 func (s *CustomerAuthService) Logout(userID uint) error {
 	return s.authRepo.RevokeAllUserRefreshTokens(userID)
+}
+
+// GetUserByID returns a user by ID.
+func (s *CustomerAuthService) GetUserByID(userID uint) (*models.User, error) {
+	return s.authRepo.FindUserByID(userID)
+}
+
+// GetUserByUsername returns a user by username.
+func (s *CustomerAuthService) GetUserByUsername(username string) (*models.User, error) {
+	return s.authRepo.FindUserByUsername(username)
 }
 
 // ─── Admin Auth Service ───────────────────────────────────────────────────────
@@ -128,14 +138,19 @@ func (s *AdminAuthService) Login(username, password string) (string, string, tim
 	return s.issueTokenPair(user)
 }
 
-// Refresh rotates an admin refresh token and issues a new pair.
+// Refresh validates the refresh token and issues a new access token without rotation.
 func (s *AdminAuthService) Refresh(refreshToken string) (string, string, time.Time, error) {
-	return s.rotateRefreshToken(refreshToken)
+	return refreshAccessTokenWithoutRotation(s.authRepo, s.tokenSvc, refreshToken)
 }
 
 // Logout invalidates all refresh tokens for the given admin.
 func (s *AdminAuthService) Logout(userID uint) error {
 	return s.authRepo.RevokeAllUserRefreshTokens(userID)
+}
+
+// GetUserByUsername retrieves a user by username (used for admin login response).
+func (s *AdminAuthService) GetUserByUsername(username string) (*models.User, error) {
+	return s.authRepo.FindUserByUsername(username)
 }
 
 // ChangePassword updates an admin's password after verifying the current one.
@@ -192,38 +207,27 @@ func issueTokenPair(authRepo *repositories.AuthRepository, ts *TokenService, use
 	return accessToken, refreshToken, expiresAt, nil
 }
 
-func (s *CustomerAuthService) rotateRefreshToken(refreshToken string) (string, string, time.Time, error) {
-	return rotateRefreshToken(s.authRepo, s.tokenSvc, refreshToken)
-}
-
-func (s *AdminAuthService) rotateRefreshToken(refreshToken string) (string, string, time.Time, error) {
-	return rotateRefreshToken(s.authRepo, s.tokenSvc, refreshToken)
-}
-
-func rotateRefreshToken(authRepo *repositories.AuthRepository, ts *TokenService, refreshToken string) (string, string, time.Time, error) {
+func refreshAccessTokenWithoutRotation(authRepo *repositories.AuthRepository, ts *TokenService, refreshToken string) (string, string, time.Time, error) {
 	claims, err := ts.ValidateRefreshToken(refreshToken)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
 
 	storedRT, err := authRepo.FindRefreshToken(claims.TokenID)
-	if err != nil {
+	if err != nil || !storedRT.IsValid() {
 		return "", "", time.Time{}, models.ErrRefreshTokenInvalid
 	}
-	if !storedRT.IsValid() {
-		// Token reuse detected — revoke entire token family
-		_ = authRepo.RevokeAllUserRefreshTokens(claims.UserID)
-		return "", "", time.Time{}, models.ErrRefreshTokenReused
-	}
-
-	// Mark old token as used and revoked
-	_ = authRepo.MarkRefreshTokenUsed(claims.TokenID)
-	_ = authRepo.RevokeRefreshToken(claims.TokenID)
 
 	user, err := authRepo.FindUserByID(claims.UserID)
 	if err != nil {
 		return "", "", time.Time{}, models.ErrUserNotFound
 	}
 
-	return issueTokenPair(authRepo, ts, user)
+	accessToken, _, err := ts.GenerateAccessToken(user.ID, user.Username, string(user.Role))
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+
+	// Trả lại AccessToken mới, và giữ nguyên RefreshToken cũ + thời gian hết hạn cũ
+	return accessToken, refreshToken, storedRT.ExpiresAt, nil
 }

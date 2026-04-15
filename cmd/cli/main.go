@@ -108,10 +108,12 @@ func (c *CLI) validateCmd(certFile string) {
 		c.error("validate: failed to parse certificate: %v", err)
 		return
 	}
+	_ = cert
 
-	validator := services.NewValidator()
-	if err := validator.ValidateCertificate(cert); err != nil {
-		fmt.Fprintf(c.out, "VALID: false\nERROR: %v\n", err)
+	// Use the existing ValidatePEM helper directly
+	valid, verr := services.ValidatePEMString(string(data))
+	if !valid {
+		fmt.Fprintf(c.out, "VALID: false\nERROR: %v\n", verr)
 	} else {
 		fmt.Fprintf(c.out, "VALID: true\n")
 	}

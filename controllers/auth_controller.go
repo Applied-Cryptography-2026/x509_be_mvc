@@ -84,11 +84,24 @@ func (ac *AuthController) Login(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, ErrorResponse{Error: err.Error()})
 	}
 
+	// Look up user info for the response payload
+	fetchedUser, err := ac.svc.GetUserByUsername(req.Username)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to load user"})
+	}
+
 	ac.setRefreshCookie(c, refreshToken, expiresAt)
 
-	return c.JSON(http.StatusOK, TokenResponse{
-		AccessToken: accessToken,
-		ExpiresIn:   int64(time.Until(expiresAt).Seconds()),
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"access_token": accessToken,
+		"expires_in":   int64(time.Until(expiresAt).Seconds()),
+		"user": map[string]interface{}{
+			"id":       fetchedUser.ID,
+			"username": fetchedUser.Username,
+			"name":     fetchedUser.Name,
+			"email":    fetchedUser.Email,
+			"role":     fetchedUser.Role,
+		},
 	})
 }
 
@@ -115,7 +128,6 @@ func (ac *AuthController) Refresh(c echo.Context) error {
 }
 
 // Logout handles POST /auth/logout.
-// Requires a valid JWT. Revokes all refresh tokens and clears the cookie.
 func (ac *AuthController) Logout(c echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
@@ -128,6 +140,28 @@ func (ac *AuthController) Logout(c echo.Context) error {
 
 	ac.clearRefreshCookie(c)
 	return c.JSON(http.StatusOK, map[string]string{"message": "logged out"})
+}
+
+// GetMe returns the current authenticated user's info.
+// GET /auth/me
+func (ac *AuthController) GetMe(c echo.Context) error {
+	userID, ok := c.Get("user_id").(uint)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "unauthorized"})
+	}
+
+	user, err := ac.svc.GetUserByID(userID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, ErrorResponse{Error: "user not found"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"id":       user.ID,
+		"username": user.Username,
+		"name":     user.Name,
+		"email":    user.Email,
+		"role":     user.Role,
+	})
 }
 
 // ─── Cookie helpers ──────────────────────────────────────────────────────────

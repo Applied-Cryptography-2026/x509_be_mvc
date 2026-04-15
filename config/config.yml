@@ -38,3 +38,10 @@ app:
   notify_days: 30
   storage_dir: ./certs
   private_key_pass: ""
+
+jwt:
+  access_token_secret: "super-secret-access-token-key-change-me"
+  refresh_token_secret: "super-secret-refresh-token-key-change-me"
+  access_token_ttl_minutes: 15
+  refresh_token_ttl_days: 7
+  issuer: "x509-mvc-auth"

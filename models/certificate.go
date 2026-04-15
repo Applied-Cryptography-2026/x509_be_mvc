@@ -24,7 +24,9 @@ type Certificate struct {
 	OCSPURL     string     `json:"ocsp_url"`            // OCSP responder URL
 	CertPEM     string     `json:"cert_pem"`            // PEM-encoded certificate
 	KeyPEM      string     `json:"key_pem,omitempty"`   // PEM-encoded private key (stored encrypted at rest)
-	ParentID    *uint      `json:"parent_id,omitempty"` // FK to issuer CA certificate
+	KeyAlgorithm string    `json:"key_algorithm"`       // RSA or ECDSA
+	ParentID     *uint      `json:"parent_id,omitempty"` // FK to issuer CA certificate
+	RequesterID *uint      `json:"requester_id,omitempty"` // FK to the customer who submitted the CSR
 	Profile     string     `json:"profile"`             // e.g. "tls-server", "tls-client", "code-signing"
 	Status      CertStatus `json:"status"`              // active, expired, revoked, pending
 	CreatedAt   time.Time  `json:"created_at"`

@@ -18,6 +18,7 @@ type CSR struct {
 	ApproverID         *uint      `json:"approver_id,omitempty"`
 	Notes              string     `json:"notes,omitempty"`
 	RequesterID        uint       `json:"requester_id"` // links to the customer user who submitted
+	KeyPairID          *uint      `json:"key_pair_id,omitempty"` // links to the key pair used
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 	DeletedAt          *time.Time `json:"deleted_at,omitempty"`

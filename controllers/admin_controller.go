@@ -48,9 +48,19 @@ func (ac *AdminController) Login(c echo.Context) error {
 
 	ac.setRefreshCookie(c, refreshToken, expiresAt)
 
-	return c.JSON(http.StatusOK, TokenResponse{
-		AccessToken: accessToken,
-		ExpiresIn:   int64(time.Until(expiresAt).Seconds()),
+	// Fetch user for response
+	user, _ := ac.svc.GetUserByUsername(req.Username)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"access_token": accessToken,
+		"expires_in":   int64(time.Until(expiresAt).Seconds()),
+		"user": map[string]interface{}{
+			"id":       user.ID,
+			"username": user.Username,
+			"name":     user.Name,
+			"email":    user.Email,
+			"role":     user.Role,
+		},
 	})
 }
 

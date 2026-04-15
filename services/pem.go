@@ -10,18 +10,18 @@ import (
 // DecodePEMBlock extracts the first matching PEM block and returns its DER bytes.
 func DecodePEMBlock(pemStr string, blockType string) ([]byte, error) {
 	data := []byte(pemStr)
-	for{
+	for {
 		block, rest := pem.Decode(data)
-		if block == nil{
+		if block == nil {
 			return nil, fmt.Errorf("PEM block type %s not found", blockType)
 		}
-		if block.Type == blockType{
+		if block.Type == blockType {
 			return block.Bytes, nil
 		}
 		// If no match, continue searching in the remaining data
-		data = rest 
+		data = rest
 		// If no more data to parse
-		if len(data) == 0{
+		if len(data) == 0 {
 			break
 		}
 	}
@@ -32,11 +32,11 @@ func DecodePEMBlock(pemStr string, blockType string) ([]byte, error) {
 func EncodeToPEM(der []byte, blockType string) string {
 	pemEncode := new(bytes.Buffer)
 	err := pem.Encode(pemEncode, &pem.Block{
-		Type: blockType,
+		Type:  blockType,
 		Bytes: der,
 	})
 
-	if err != nil{
+	if err != nil {
 		return ""
 	}
 
@@ -46,12 +46,12 @@ func EncodeToPEM(der []byte, blockType string) string {
 // ParseCertificatePEM parses a PEM-encoded certificate.
 func ParseCertificatePEM(pemStr string) (*x509.Certificate, error) {
 	derBytes, err := DecodePEMBlock(pemStr, "CERTIFICATE")
-	if err != nil{
+	if err != nil {
 		return nil, fmt.Errorf("Cannot decode PEM: %v", err)
 	}
 
 	cert, err := x509.ParseCertificate(derBytes)
-	if err != nil{
+	if err != nil {
 		return nil, fmt.Errorf("Cannot parse x509 certificate: %v", err)
 	}
 
@@ -94,7 +94,14 @@ func parsePrivateKey(der []byte) (any, error) {
 	return nil, fmt.Errorf("unable to identify private key format (supports PKCS#8, PKCS#1, SEC1)")
 }
 
-// ParseCSRPEM parses a PEM-encoded CSR.
+// ValidatePEMString parses a PEM string and returns whether it's valid.
+func ValidatePEMString(pemStr string) (bool, error) {
+	_, err := ParseCertificatePEM(pemStr)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
 func ParseCSRPEM(pemStr string) (*x509.CertificateRequest, error) {
 	// decode để lấy der
 	derBytes, err := DecodePEMBlock(pemStr, "CERTIFICATE REQUEST")
@@ -102,7 +109,7 @@ func ParseCSRPEM(pemStr string) (*x509.CertificateRequest, error) {
 		return nil, fmt.Errorf("failed to decode PEM for CSR: %v", err)
 	}
 
-	// parse der 
+	// parse der
 	csr, err := x509.ParseCertificateRequest(derBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse CSR: %v", err)

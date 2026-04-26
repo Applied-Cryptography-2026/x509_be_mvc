@@ -27,9 +27,10 @@ type RevocationRequestResponse struct {
 
 // RevocationRequestService handles business logic for revocation requests.
 type RevocationRequestService struct {
-	revokeRepo     *repositories.RevocationRequestRepository
-	certRepo       *repositories.CertificateRepository
-	authRepo       *repositories.AuthRepository
+	revokeRepo *repositories.RevocationRequestRepository
+	certRepo   *repositories.CertificateRepository
+	authRepo   *repositories.AuthRepository
+	audit      *AuditLogService
 }
 
 // NewRevocationRequestService constructs a RevocationRequestService.
@@ -37,11 +38,13 @@ func NewRevocationRequestService(
 	revokeRepo *repositories.RevocationRequestRepository,
 	certRepo *repositories.CertificateRepository,
 	authRepo *repositories.AuthRepository,
+	auditService *AuditLogService,
 ) *RevocationRequestService {
 	return &RevocationRequestService{
 		revokeRepo: revokeRepo,
 		certRepo:   certRepo,
 		authRepo:   authRepo,
+		audit:      auditService,
 	}
 }
 
@@ -126,6 +129,17 @@ func (s *RevocationRequestService) Submit(certID, requesterID uint, reason strin
 		CreatedAt:     created.CreatedAt,
 	}
 	s.enrich(resp)
+
+	// Log revocation request submission
+	description := fmt.Sprintf("Submitted revocation request | Domain: %s | Reason: %s", cert.Subject, reason)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(requesterID),
+		Action:      "create",
+		EntityType:  strPtr("revocation_request"),
+		EntityID:    IntPtr(created.ID),
+		Description: description,
+	})
+
 	return resp, nil
 }
 
@@ -213,6 +227,17 @@ func (s *RevocationRequestService) Approve(reqID, adminID uint, notes string) (*
 
 	resp := s.toResponse(updated, cert.Subject, cert.Serial, "")
 	s.enrich(resp)
+
+	// Log revocation approval
+	description := fmt.Sprintf("Approved revocation request | Domain: %s", cert.Subject)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(adminID),
+		Action:      "approve",
+		EntityType:  strPtr("revocation_request"),
+		EntityID:    IntPtr(updated.ID),
+		Description: description,
+	})
+
 	return resp, nil
 }
 
@@ -224,6 +249,12 @@ func (s *RevocationRequestService) Reject(reqID, adminID uint, notes string) (*R
 	}
 	if req.Status != models.RevokeStatusPending {
 		return nil, fmt.Errorf("request is not pending")
+	}
+
+	// Fetch certificate for domain info
+	cert, err := s.certRepo.FindByID(req.CertificateID)
+	if err != nil {
+		return nil, fmt.Errorf("certificate not found")
 	}
 
 	now := time.Now()
@@ -238,6 +269,17 @@ func (s *RevocationRequestService) Reject(reqID, adminID uint, notes string) (*R
 
 	resp := s.toResponse(updated, "", "", "")
 	s.enrich(resp)
+
+	// Log revocation rejection
+	description := fmt.Sprintf("Rejected revocation request | Domain: %s | Reason: %s", cert.Subject, notes)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(adminID),
+		Action:      "reject",
+		EntityType:  strPtr("revocation_request"),
+		EntityID:    IntPtr(updated.ID),
+		Description: description,
+	})
+
 	return resp, nil
 }
 
@@ -253,7 +295,24 @@ func (s *RevocationRequestService) Cancel(reqID, requesterID uint) error {
 	if req.Status != models.RevokeStatusPending {
 		return fmt.Errorf("only pending requests can be cancelled")
 	}
-	return s.revokeRepo.Delete(reqID)
+	err = s.revokeRepo.Delete(reqID)
+	if err == nil {
+		// Fetch certificate for domain info
+		cert, _ := s.certRepo.FindByID(req.CertificateID)
+		domain := ""
+		if cert != nil {
+			domain = cert.Subject
+		}
+		description := fmt.Sprintf("Cancelled revocation request | Domain: %s", domain)
+		s.audit.Record(&LogRequest{
+			UserID:      IntPtr(requesterID),
+			Action:      "cancel",
+			EntityType:  strPtr("revocation_request"),
+			EntityID:    IntPtr(reqID),
+			Description: description,
+		})
+	}
+	return err
 }
 
 // RevokeDirectly allows an admin to directly revoke a certificate without a request.
@@ -302,5 +361,16 @@ func (s *RevocationRequestService) RevokeDirectly(certID, adminID uint, reason s
 		CreatedAt:    created.CreatedAt,
 	}
 	s.enrich(resp)
+
+	// Log direct revocation
+	description := fmt.Sprintf("Directly revoked certificate | Domain: %s | Reason: %s", cert.Subject, reason)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(adminID),
+		Action:      "revoke_directly",
+		EntityType:  strPtr("certificate"),
+		EntityID:    IntPtr(certID),
+		Description: description,
+	})
+
 	return resp, nil
 }

@@ -100,6 +100,9 @@ func (cc *CertificateController) DownloadCertificate(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, ErrorResponse{Error: "certificate PEM not available"})
 	}
 
+	// Log certificate download
+	cc.svc.LogCertificateDownload(userID, cert.Subject)
+
 	filename := "certificate.crt"
 	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	c.Response().Header().Set("Content-Type", "application/x-pem-file")
@@ -205,12 +208,14 @@ func (cc *CertificateController) ImportCertificate(c echo.Context) error {
 // DeleteCertificate soft-deletes a certificate.
 // DELETE /certificates/:id
 func (cc *CertificateController) DeleteCertificate(c echo.Context) error {
+	adminID := c.Get(middleware.UserIDKey).(uint)
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid certificate id"})
 	}
 
-	if err := cc.svc.DeleteCertificate(uint(id)); err != nil {
+	if err := cc.svc.DeleteCertificate(uint(id), adminID); err != nil {
 		return c.JSON(http.StatusNotFound, ErrorResponse{Error: "certificate not found"})
 	}
 
@@ -220,6 +225,8 @@ func (cc *CertificateController) DeleteCertificate(c echo.Context) error {
 // DownloadAdminCertificate returns the PEM-encoded certificate as a downloadable file (admin).
 // GET /admin/certificates/:id/download
 func (cc *CertificateController) DownloadAdminCertificate(c echo.Context) error {
+	adminID := c.Get(middleware.UserIDKey).(uint)
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid certificate id"})
@@ -233,6 +240,9 @@ func (cc *CertificateController) DownloadAdminCertificate(c echo.Context) error 
 	if cert.CertPEM == "" {
 		return c.JSON(http.StatusNotFound, ErrorResponse{Error: "certificate PEM not available"})
 	}
+
+	// Log certificate download (admin)
+	cc.svc.LogCertificateDownload(adminID, cert.Subject)
 
 	filename := "certificate.crt"
 	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
@@ -288,6 +298,8 @@ func (cc *CertificateController) GetExpiringCertificates(c echo.Context) error {
 // ValidateCertificate validates a certificate by inline PEM.
 // POST /certificates/validate
 func (cc *CertificateController) ValidateCertificate(c echo.Context) error {
+	adminID := c.Get(middleware.UserIDKey).(uint)
+
 	var req ValidateCertificateRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
@@ -296,7 +308,7 @@ func (cc *CertificateController) ValidateCertificate(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Error: "cert_pem is required"})
 	}
 
-	valid, err := cc.svc.ValidatePEM(req.CertPEM)
+	valid, err := cc.svc.ValidatePEM(req.CertPEM, adminID)
 	if err != nil {
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"valid":  false,

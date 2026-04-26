@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/your-org/x509-mvc/middleware"
 	"github.com/your-org/x509-mvc/services"
 )
 
@@ -61,6 +62,8 @@ func (cc *CAController) GetRootCA(c echo.Context) error {
 // GenerateRootCA generates and saves a new Root CA.
 // POST /admin/root-ca/generate
 func (cc *CAController) GenerateRootCA(c echo.Context) error {
+	adminID := c.Get(middleware.UserIDKey).(uint)
+
 	var req GenerateRootCARequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid request body"})
@@ -93,7 +96,7 @@ func (cc *CAController) GenerateRootCA(c echo.Context) error {
 		Algorithm:    req.Algorithm,
 		KeySize:      req.KeySize,
 		Years:        req.Years,
-	})
+	}, adminID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 	}

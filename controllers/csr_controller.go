@@ -203,7 +203,9 @@ func (sc *CSRController) RejectCSR(c echo.Context) error {
 	var req RejectCSRRequest
 	c.Bind(&req) // notes are optional
 
-	csr, err := sc.svc.RejectCSR(uint(id), req.Notes)
+	rejectorID := c.Get(middleware.UserIDKey).(uint)
+
+	csr, err := sc.svc.RejectCSR(uint(id), rejectorID, req.Notes)
 	if err != nil {
 		return c.JSON(400, ErrorResponse{Error: err.Error()})
 	}
@@ -214,6 +216,8 @@ func (sc *CSRController) RejectCSR(c echo.Context) error {
 // DownloadCSR returns the CSR PEM as a downloadable file.
 // GET /csrs/:id/download
 func (sc *CSRController) DownloadCSR(c echo.Context) error {
+	userID := c.Get(middleware.UserIDKey).(uint)
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		return c.JSON(400, ErrorResponse{Error: "invalid CSR id"})
@@ -227,6 +231,9 @@ func (sc *CSRController) DownloadCSR(c echo.Context) error {
 	if csr.Pem == "" {
 		return c.JSON(404, ErrorResponse{Error: "CSR PEM not available"})
 	}
+
+	// Log CSR download
+	sc.svc.LogCSRDownload(userID, csr.Subject)
 
 	filename := "csr.pem"
 	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)

@@ -13,6 +13,29 @@ import (
 	"github.com/your-org/x509-mvc/repositories"
 )
 
+// CertificateService handles certificate business logic
+type CertificateService struct {
+	repo  *repositories.CertificateRepository
+	dbRepo *repositories.DBRepository
+	converter *Converter
+	audit *AuditLogService
+}
+
+// NewCertificateService constructs a CertificateService
+func NewCertificateService(
+	repo *repositories.CertificateRepository,
+	dbRepo *repositories.DBRepository,
+	converter *Converter,
+	auditService *AuditLogService,
+) *CertificateService {
+	return &CertificateService{
+		repo: repo,
+		dbRepo: dbRepo,
+		converter: converter,
+		audit: auditService,
+	}
+}
+
 // CertificateResponse is the API-facing shape for a certificate.
 type CertificateResponse struct {
 	ID            uint      `json:"id"`
@@ -102,27 +125,6 @@ func deriveAlgorithmFromPKCS8(der []byte) string {
 		}
 	}
 	return ""
-}
-
-// CertificateService handles certificate-related business logic.
-// In MVC, services act as the business logic layer between controllers and repositories.
-type CertificateService struct {
-	repo      *repositories.CertificateRepository
-	dbRepo    *repositories.DBRepository
-	converter *Converter
-}
-
-// NewCertificateService constructs a CertificateService.
-func NewCertificateService(
-	repo *repositories.CertificateRepository,
-	dbRepo *repositories.DBRepository,
-	converter *Converter,
-) *CertificateService {
-	return &CertificateService{
-		repo:      repo,
-		dbRepo:    dbRepo,
-		converter: converter,
-	}
 }
 
 func (s *CertificateService) GetCertificate(id uint) (*CertificateResponse, error) {
@@ -259,19 +261,64 @@ func (s *CertificateService) RenewCertificate(id uint, newCSR *models.CSR) (*Cer
 	return nil, errors.New("renew flow must go through CA approve route. Submit new CSR and Approve it")
 }
 
-func (s *CertificateService) DeleteCertificate(id uint) error {
-	return s.repo.Delete(id)
+func (s *CertificateService) DeleteCertificate(id uint, adminID uint) error {
+	cert, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	err = s.repo.Delete(id)
+	if err == nil {
+		description := fmt.Sprintf("Deleted certificate | Domain: %s", cert.Subject)
+		s.audit.Record(&LogRequest{
+			UserID:      IntPtr(adminID),
+			Action:      "delete",
+			EntityType:  strPtr("certificate"),
+			EntityID:    IntPtr(id),
+			Description: description,
+		})
+	}
+	return err
 }
 
 // ValidatePEM parses a PEM-encoded certificate and returns whether it is valid.
-func (s *CertificateService) ValidatePEM(pemStr string) (bool, error) {
+func (s *CertificateService) ValidatePEM(pemStr string, adminID uint) (bool, error) {
 	block, _ := pem.Decode([]byte(pemStr))
 	if block == nil {
 		return false, errors.New("invalid PEM content")
 	}
-	_, err := x509.ParseCertificate(block.Bytes)
+	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		return false, fmt.Errorf("parse error: %w", err)
 	}
-	return true, nil
+	
+	// Determine if certificate is valid
+	isValid := cert.NotBefore.Before(time.Now()) && cert.NotAfter.After(time.Now())
+	validStr := "NO"
+	if isValid {
+		validStr = "YES"
+	}
+	
+	// Format expiry date as YYYY-MM-DD
+	expiryStr := cert.NotAfter.Format("2006-01-02")
+	
+	// Log certificate validation
+	description := fmt.Sprintf("Validated certificate PEM | Domain: %s | Valid: %s | Expires: %s", cert.Subject, validStr, expiryStr)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(adminID),
+		Action:      "validate",
+		EntityType:  strPtr("certificate"),
+		Description: description,
+	})
+	return isValid, nil
+}
+
+// LogCertificateDownload logs when a certificate is downloaded
+func (s *CertificateService) LogCertificateDownload(userID uint, domain string) {
+	description := fmt.Sprintf("Downloaded certificate | Domain: %s | Format: PEM", domain)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(userID),
+		Action:      "download",
+		EntityType:  strPtr("certificate"),
+		Description: description,
+	})
 }

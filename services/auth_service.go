@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/your-org/x509-mvc/models"
@@ -14,6 +15,7 @@ type CustomerAuthService struct {
 	authRepo *repositories.AuthRepository
 	tokenSvc *TokenService
 	hasher   *Hasher
+	audit    *AuditLogService
 }
 
 // NewCustomerAuthService constructs a CustomerAuthService.
@@ -21,11 +23,13 @@ func NewCustomerAuthService(
 	authRepo *repositories.AuthRepository,
 	tokenSvc *TokenService,
 	hasher *Hasher,
+	auditService *AuditLogService,
 ) *CustomerAuthService {
 	return &CustomerAuthService{
 		authRepo: authRepo,
 		tokenSvc: tokenSvc,
 		hasher:   hasher,
+		audit:    auditService,
 	}
 }
 
@@ -57,6 +61,16 @@ func (s *CustomerAuthService) Register(username, password, name, email string) (
 		return nil, err
 	}
 
+	// Log customer registration
+	description := fmt.Sprintf("Registered with username: %s | Name: %s", user.Username, user.Name)
+	s.audit.Record(&LogRequest{
+		UserEmail:   &user.Email,
+		Action:      "register",
+		EntityType:  strPtr("user"),
+		EntityID:    IntPtr(user.ID),
+		Description: description,
+	})
+
 	return user, nil
 }
 
@@ -75,7 +89,19 @@ func (s *CustomerAuthService) Login(username, password string) (accessToken stri
 		return "", "", time.Time{}, models.ErrInvalidCredentials
 	}
 
-	return s.issueTokenPair(user)
+	accessToken, refreshToken, expiresAt, err = s.issueTokenPair(user)
+	if err == nil {
+		// Log customer login
+		s.audit.Record(&LogRequest{
+			UserID:      IntPtr(user.ID),
+			UserEmail:   &user.Email,
+			Action:      "login",
+			EntityType:  strPtr("user"),
+			EntityID:    IntPtr(user.ID),
+			Description: "Logged in",
+		})
+	}
+	return
 }
 
 // Refresh validates the refresh token and issues a new access token without rotation.
@@ -105,6 +131,7 @@ type AdminAuthService struct {
 	authRepo *repositories.AuthRepository
 	tokenSvc *TokenService
 	hasher   *Hasher
+	audit    *AuditLogService
 }
 
 // NewAdminAuthService constructs an AdminAuthService.
@@ -112,11 +139,13 @@ func NewAdminAuthService(
 	authRepo *repositories.AuthRepository,
 	tokenSvc *TokenService,
 	hasher *Hasher,
+	auditService *AuditLogService,
 ) *AdminAuthService {
 	return &AdminAuthService{
 		authRepo: authRepo,
 		tokenSvc: tokenSvc,
 		hasher:   hasher,
+		audit:    auditService,
 	}
 }
 
@@ -135,7 +164,19 @@ func (s *AdminAuthService) Login(username, password string) (string, string, tim
 		return "", "", time.Time{}, models.ErrInvalidCredentials
 	}
 
-	return s.issueTokenPair(user)
+	accessToken, refreshToken, expiresAt, err := s.issueTokenPair(user)
+	if err == nil {
+		// Log admin login
+		s.audit.Record(&LogRequest{
+			UserID:      IntPtr(user.ID),
+			UserEmail:   &user.Email,
+			Action:      "login",
+			EntityType:  strPtr("admin"),
+			EntityID:    IntPtr(user.ID),
+			Description: "Admin logged in",
+		})
+	}
+	return accessToken, refreshToken, expiresAt, err
 }
 
 // Refresh validates the refresh token and issues a new access token without rotation.

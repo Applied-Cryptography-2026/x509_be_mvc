@@ -22,14 +22,20 @@ import (
 type CRLService struct {
 	certRepo    *repositories.CertificateRepository
 	keyPairRepo *repositories.KeyPairRepository
+	audit       *AuditLogService
 }
 
 // NewCRLService constructs a CRLService.
 func NewCRLService(
 	certRepo *repositories.CertificateRepository,
 	keyPairRepo *repositories.KeyPairRepository,
+	auditService *AuditLogService,
 ) *CRLService {
-	return &CRLService{certRepo: certRepo, keyPairRepo: keyPairRepo}
+	return &CRLService{
+		certRepo:    certRepo,
+		keyPairRepo: keyPairRepo,
+		audit:       auditService,
+	}
 }
 
 // CRLBundle holds the raw CRL DER bytes and the PEM-encoded string.
@@ -41,7 +47,7 @@ type CRLBundle struct {
 // GenerateCRL builds a new X.509 CRL signed by the Root CA using the standard
 // library's CreateCertificate helper (which handles pkix.Name → ASN.1 conversion).
 // All revoked certificates in the DB are included in the CRL.
-func (s *CRLService) GenerateCRL() (*CRLBundle, error) {
+func (s *CRLService) GenerateCRL(adminID uint) (*CRLBundle, error) {
 	caBundle, err := s.loadCABundle()
 	if err != nil {
 		return nil, fmt.Errorf("crl: load CA: %w", err)
@@ -59,7 +65,21 @@ func (s *CRLService) GenerateCRL() (*CRLBundle, error) {
 	nextUpdate := thisUpdate.Add(24 * time.Hour)
 
 	// Build the CRL TBS manually and sign
-	return s.buildCRLFromTBS(caBundle, revokedCerts, crlNumber, thisUpdate, nextUpdate)
+	crlBundle, err := s.buildCRLFromTBS(caBundle, revokedCerts, crlNumber, thisUpdate, nextUpdate)
+
+	if err == nil && crlBundle != nil {
+		// Log CRL generation
+		nextUpdateStr := nextUpdate.Format("2006-01-02 15:04:05")
+		description := fmt.Sprintf("Generated CRL | Revoked Certificates Count: %d | Next Update: %s", len(revokedCerts), nextUpdateStr)
+		s.audit.Record(&LogRequest{
+			UserID:      IntPtr(adminID),
+			Action:      "create",
+			EntityType:  strPtr("crl"),
+			Description: description,
+		})
+	}
+
+	return crlBundle, err
 }
 
 // buildCRLFromTBS builds the CRL by marshaling the TBS portion and signing it.

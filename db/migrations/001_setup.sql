@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS certificates (
 
 -- +goose StatementEnd
 
+ALTER TABLE certificates ADD COLUMN key_algorithm VARCHAR(255);
+
 -- +goose Down
 -- +goose StatementBegin
 DROP TABLE IF EXISTS certificates;

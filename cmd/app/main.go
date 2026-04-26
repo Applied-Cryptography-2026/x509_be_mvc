@@ -64,17 +64,22 @@ func buildAppController(database *gorm.DB) router.AppController {
 	dbRepo := repositories.NewDBRepository(database)
 	keyPairRepo := repositories.NewKeyPairRepository(database)
 	revokeRepo := repositories.NewRevocationRequestRepository(database)
+	auditRepo := repositories.NewAuditLogRepository(database) 
 
 	// ─── Services ──────────────────────────────────────────────────────────────
 	converter := services.NewConverter()
 
+	// ─── Audit Service ──────────────────────────────────────────────────────────
+	auditService := services.NewAuditLogService(auditRepo, authRepo)
+
 	certSvc := services.NewCertificateService(
-		certRepo, dbRepo, converter,
+		certRepo, dbRepo, converter, auditService,
 	)
 
-	caSvc := services.NewCAService(certRepo)
+	caSvc := services.NewCAService(certRepo, auditService)
 	caCtrl := controllers.NewCAController(caSvc)
-	csrSvc := services.NewCSRService(csrRepo, certRepo, caSvc, keyPairRepo)
+
+	csrSvc := services.NewCSRService(csrRepo, certRepo, caSvc, keyPairRepo, authRepo, auditService)
 
 	tokenCfg := services.JWTConfig{
 		AccessTokenSecret:  config.C.JWT.AccessTokenSecret,
@@ -86,16 +91,16 @@ func buildAppController(database *gorm.DB) router.AppController {
 	tokenSvc := services.NewTokenService(tokenCfg)
 	hasher := services.NewHasher()
 
-	customerAuthSvc := services.NewCustomerAuthService(authRepo, tokenSvc, hasher)
-	adminAuthSvc := services.NewAdminAuthService(authRepo, tokenSvc, hasher)
+	customerAuthSvc := services.NewCustomerAuthService(authRepo, tokenSvc, hasher, auditService)
+	adminAuthSvc := services.NewAdminAuthService(authRepo, tokenSvc, hasher, auditService)
 
-	keyPairSvc := services.NewKeyPairService(keyPairRepo)
+	keyPairSvc := services.NewKeyPairService(keyPairRepo, auditService)
 	keyPairCtrl := controllers.NewKeyPairController(keyPairSvc)
 
-	revokeSvc := services.NewRevocationRequestService(revokeRepo, certRepo, authRepo)
+	revokeSvc := services.NewRevocationRequestService(revokeRepo, certRepo, authRepo, auditService)
 	revokeCtrl := controllers.NewRevocationRequestController(revokeSvc)
 
-	crlSvc := services.NewCRLService(certRepo, keyPairRepo)
+	crlSvc := services.NewCRLService(certRepo, keyPairRepo, auditService)
 	crlCtrl := controllers.NewCRLController(crlSvc)
 
 	// ─── Controllers ───────────────────────────────────────────────────────────
@@ -103,6 +108,7 @@ func buildAppController(database *gorm.DB) router.AppController {
 	csrCtrl := controllers.NewCSRController(csrSvc)
 	authCtrl := controllers.NewAuthController(customerAuthSvc)
 	adminCtrl := controllers.NewAdminController(adminAuthSvc)
+	auditLogCtrl := controllers.NewAuditLogController(auditService)
 
 	return router.AppController{
 		Certificate:       certCtrl,
@@ -113,6 +119,7 @@ func buildAppController(database *gorm.DB) router.AppController {
 		KeyPair:           keyPairCtrl,
 		RevocationRequest: revokeCtrl,
 		CRL:               crlCtrl,
+		AuditLog:          auditLogCtrl,
 	}
 }
 

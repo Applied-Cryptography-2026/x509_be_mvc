@@ -31,11 +31,15 @@ type CABundle struct {
 // Root CA được tự sinh và lưu vào bảng certificates (IsCA=true).
 type CAService struct {
 	certRepo *repositories.CertificateRepository
+	audit    *AuditLogService
 }
 
 // NewCAService constructs a CAService.
-func NewCAService(certRepo *repositories.CertificateRepository) *CAService {
-	return &CAService{certRepo: certRepo}
+func NewCAService(certRepo *repositories.CertificateRepository, auditService *AuditLogService) *CAService {
+	return &CAService{
+		certRepo: certRepo,
+		audit:    auditService,
+	}
 }
 
 // EnsureCA kiểm tra xem Root CA đã tồn tại trong DB chưa.
@@ -112,8 +116,23 @@ func (s *CAService) EnsureCA() error {
 		CreatedAt:   time.Now(),
 	}
 
-	_, err = s.certRepo.Create(record)
-	return err
+	created, err := s.certRepo.Create(record)
+	if err != nil {
+		return err
+	}
+
+	// Log Root CA creation (system-generated at startup)
+	expiryStr := time.Now().AddDate(10, 0, 0).Format("2006-01-02")
+	description := fmt.Sprintf("Generated Root CA | Subject: Root CA | Algorithm: RSA | Key Size: 2048 bits | Valid Until: %s", expiryStr)
+	s.audit.Record(&LogRequest{
+		UserID:      nil, // System-generated, no specific admin
+		Action:      "generate_root_ca",
+		EntityType:  strPtr("certificate"),
+		EntityID:    IntPtr(created.ID),
+		Description: description,
+	})
+
+	return nil
 }
 
 // LoadCA đọc Root CA từ DB và parse về CABundle sẵn sàng dùng.
@@ -220,7 +239,7 @@ func (s *CAService) GetRootCA() (*CAResponse, error) {
 }
 
 // GenerateRootCA generates a new self-signed Root CA certificate and persists it.
-func (s *CAService) GenerateRootCA(req *GenerateCARequest) (*CAResponse, error) {
+func (s *CAService) GenerateRootCA(req *GenerateCARequest, adminID uint) (*CAResponse, error) {
 	if req.Years <= 0 {
 		req.Years = 10
 	}
@@ -342,6 +361,17 @@ func (s *CAService) GenerateRootCA(req *GenerateCARequest) (*CAResponse, error) 
 	if err != nil {
 		return nil, fmt.Errorf("ca: save to DB: %w", err)
 	}
+
+	// Log to audit
+	expiryStr := time.Now().AddDate(req.Years, 0, 0).Format("2006-01-02")
+	description := fmt.Sprintf("Generated Root CA | Subject: %s | Algorithm: %s | Key Size: %d bits | Valid Until: %s", subject, req.Algorithm, req.KeySize, expiryStr)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(adminID),
+		Action:      "generate_root_ca",
+		EntityType:  strPtr("certificate"),
+		EntityID:    IntPtr(created.ID),
+		Description: description,
+	})
 
 	return &CAResponse{
 		ID:           created.ID,

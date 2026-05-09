@@ -19,12 +19,13 @@ import (
 
 // KeyPairService handles cryptographic key pair generation and storage.
 type KeyPairService struct {
-	repo *repositories.KeyPairRepository
+	repo  *repositories.KeyPairRepository
+	audit *AuditLogService
 }
 
 // NewKeyPairService constructs a KeyPairService.
-func NewKeyPairService(repo *repositories.KeyPairRepository) *KeyPairService {
-	return &KeyPairService{repo: repo}
+func NewKeyPairService(repo *repositories.KeyPairRepository, auditService *AuditLogService) *KeyPairService {
+	return &KeyPairService{repo: repo, audit: auditService}
 }
 
 // GenerateRequest is the input for generating a key pair.
@@ -57,8 +58,25 @@ func (s *KeyPairService) GetByID(id uint) (*models.KeyPair, error) {
 }
 
 // Delete soft-deletes a key pair.
-func (s *KeyPairService) Delete(id uint) error {
-	return s.repo.Delete(id)
+func (s *KeyPairService) Delete(id uint, userID uint) error {
+	// Fetch keypair details before deletion for audit log
+	kp, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	
+	err = s.repo.Delete(id)
+	if err == nil {
+		description := fmt.Sprintf("Deleted key pair | Algorithm: %s | Key Size: %d bits", kp.Algorithm, kp.KeySize)
+		s.audit.Record(&LogRequest{
+			UserID:      IntPtr(userID),
+			Action:      "delete",
+			EntityType:  strPtr("key_pair"),
+			EntityID:    IntPtr(id),
+			Description: description,
+		})
+	}
+	return err
 }
 
 // Generate creates a new key pair and stores it.
@@ -110,6 +128,16 @@ func (s *KeyPairService) Generate(req *GenerateRequest, ownerID uint) (*Generate
 	if err != nil {
 		return nil, fmt.Errorf("keypair: save: %w", err)
 	}
+
+	// Log the key pair generation
+	description := fmt.Sprintf("Created key pair | Algorithm: %s | Key Size: %d bits", req.Algorithm, req.KeySize)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(ownerID),
+		Action:      "create",
+		EntityType:  strPtr("key_pair"),
+		EntityID:    IntPtr(saved.ID),
+		Description: description,
+	})
 
 	return &GenerateResponse{
 		ID:             saved.ID,
@@ -231,4 +259,15 @@ func (s *KeyPairService) BuildCSR(kp *models.KeyPair, commonName string, dnsName
 
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 	return string(csrPEM), nil
+}
+
+// LogKeyPairDownload logs when a private key is downloaded
+func (s *KeyPairService) LogKeyPairDownload(userID uint, keyName string, algorithm string, keySize int) {
+	description := fmt.Sprintf("Downloaded private key | Key Pair: %s | Algorithm: %s | Key Size: %d bits", keyName, algorithm, keySize)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(userID),
+		Action:      "download_key",
+		EntityType:  strPtr("key_pair"),
+		Description: description,
+	})
 }

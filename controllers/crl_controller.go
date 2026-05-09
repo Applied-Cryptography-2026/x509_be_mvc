@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/your-org/x509-mvc/middleware"
 	"github.com/your-org/x509-mvc/services"
 )
 
@@ -20,7 +21,9 @@ func NewCRLController(crlSvc *services.CRLService) *CRLController {
 // GenerateCRL generates a fresh X.509 CRL signed by the Root CA.
 // GET /admin/crl/generate
 func (cc *CRLController) GenerateCRL(c echo.Context) error {
-	crl, err := cc.crlSvc.GenerateCRL()
+	adminID := c.Get(middleware.UserIDKey).(uint)
+
+	crl, err := cc.crlSvc.GenerateCRL(adminID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 	}

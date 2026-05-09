@@ -19,10 +19,12 @@ import (
 
 // CSRService handles CSR-related business logic.
 type CSRService struct {
-	repo      *repositories.CSRRepository
-	certRepo  *repositories.CertificateRepository
-	caSvc     *CAService
+	repo        *repositories.CSRRepository
+	certRepo    *repositories.CertificateRepository
+	caSvc       *CAService
 	keyPairRepo *repositories.KeyPairRepository
+	authRepo    *repositories.AuthRepository
+	audit       *AuditLogService
 }
 
 // SubmitCSRRequest is the input for submitting a new CSR.
@@ -40,12 +42,16 @@ func NewCSRService(
 	certRepo *repositories.CertificateRepository,
 	caSvc *CAService,
 	keyPairRepo *repositories.KeyPairRepository,
+	authRepo *repositories.AuthRepository,
+	auditService *AuditLogService,
 ) *CSRService {
 	return &CSRService{
-		repo:       repo,
-		certRepo:   certRepo,
-		caSvc:      caSvc,
+		repo:        repo,
+		certRepo:    certRepo,
+		caSvc:       caSvc,
 		keyPairRepo: keyPairRepo,
+		authRepo:    authRepo,
+		audit:       auditService,
 	}
 }
 
@@ -137,6 +143,17 @@ func (s *CSRService) SubmitCSR(req *SubmitCSRRequest, requesterID uint) (*models
 	if err != nil {
 		return nil, fmt.Errorf("persist CSR: %w", err)
 	}
+
+	// Log the CSR submission
+	description := fmt.Sprintf("Submitted CSR | Domain: %s", req.CommonName)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(requesterID),
+		Action:      "create",
+		EntityType:  strPtr("csr"),
+		EntityID:    IntPtr(saved.ID),
+		Description: description,
+	})
+
 	return saved, nil
 }
 
@@ -251,11 +268,26 @@ func (s *CSRService) ApproveCSR(id uint, approverID uint) (*models.CSR, error) {
 	if err != nil {
 		return nil, fmt.Errorf("approve: update CSR status: %w", err)
 	}
+
+	// Log CSR approval - fetch requester email
+	requesterEmail := ""
+	if requester, err := s.authRepo.FindUserByID(csrRecord.RequesterID); err == nil {
+		requesterEmail = requester.Email
+	}
+	description := fmt.Sprintf("Approved CSR | Domain: %s | Customer: %s", updated.Subject, requesterEmail)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(approverID),
+		Action:      "approve",
+		EntityType:  strPtr("csr"),
+		EntityID:    IntPtr(updated.ID),
+		Description: description,
+	})
+
 	return updated, nil
 }
 
 // RejectCSR transitions a CSR from pending to rejected.
-func (s *CSRService) RejectCSR(id uint, notes string) (*models.CSR, error) {
+func (s *CSRService) RejectCSR(id uint, rejectorID uint, notes string) (*models.CSR, error) {
 	csrRecord, err := s.repo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("reject: CSR %d not found: %w", id, err)
@@ -273,6 +305,21 @@ func (s *CSRService) RejectCSR(id uint, notes string) (*models.CSR, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reject: update CSR: %w", err)
 	}
+
+	// Log CSR rejection - fetch requester email
+	requesterEmail := ""
+	if requester, err := s.authRepo.FindUserByID(csrRecord.RequesterID); err == nil {
+		requesterEmail = requester.Email
+	}
+	description := fmt.Sprintf("Rejected CSR | Domain: %s | Customer: %s | Reason: %s", updated.Subject, requesterEmail, notes)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(rejectorID),
+		Action:      "reject",
+		EntityType:  strPtr("csr"),
+		EntityID:    IntPtr(updated.ID),
+		Description: description,
+	})
+
 	return updated, nil
 }
 
@@ -294,6 +341,17 @@ func (s *CSRService) ListPendingCSRs() ([]*models.CSR, error) {
 // ListAllCSRs returns all CSRs.
 func (s *CSRService) ListAllCSRs() ([]*models.CSR, error) {
 	return s.repo.FindAll()
+}
+
+// LogCSRDownload logs when a CSR is downloaded
+func (s *CSRService) LogCSRDownload(userID uint, domain string) {
+	description := fmt.Sprintf("Downloaded CSR | Domain: %s", domain)
+	s.audit.Record(&LogRequest{
+		UserID:      IntPtr(userID),
+		Action:      "download",
+		EntityType:  strPtr("csr"),
+		Description: description,
+	})
 }
 
 // nowFunc is injectable for testability.

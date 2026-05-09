@@ -29,6 +29,7 @@ func main() {
 		&models.RefreshToken{},
 		&models.KeyPair{},
 		&models.RevocationRequest{},
+		&models.AuditLog{},
 	)
 	if err != nil {
 		log.Fatalln("migration: AutoMigrate failed:", err)

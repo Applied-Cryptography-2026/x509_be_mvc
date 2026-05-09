@@ -127,7 +127,7 @@ func (kc *KeyPairController) DeleteKeyPair(c echo.Context) error {
 		return c.JSON(403, ErrorResponse{Error: "access denied"})
 	}
 
-	if err := kc.svc.Delete(uint(id)); err != nil {
+	if err := kc.svc.Delete(uint(id), userID); err != nil {
 		return c.JSON(500, ErrorResponse{Error: "failed to delete key pair"})
 	}
 
@@ -155,6 +155,9 @@ func (kc *KeyPairController) DownloadKeyPEM(c echo.Context) error {
 	if kp.PrivateKeyPEM == "" {
 		return c.JSON(404, ErrorResponse{Error: "private key not available"})
 	}
+
+	// Log private key download
+	kc.svc.LogKeyPairDownload(userID, kp.Name, kp.Algorithm, kp.KeySize)
 
 	filename := kp.Name + ".key.pem"
 	c.Response().Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)

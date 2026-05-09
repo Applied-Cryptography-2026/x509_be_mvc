@@ -1,8 +1,8 @@
 database:
   user: root
-  password: Phu050912
+  password: Quin1602^^
   net: tcp
-  addr: 127.0.0.1:4001
+  addr: 127.0.0.1:3306
   dbname: x509
   allowNativePasswords: true
   params:

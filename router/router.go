@@ -17,6 +17,7 @@ type AppController struct {
 	KeyPair           *controllers.KeyPairController
 	RevocationRequest *controllers.RevocationRequestController
 	CRL               *controllers.CRLController
+	AuditLog          *controllers.AuditLogController 
 }
 
 // NewRouter wires all HTTP routes and middleware to the Echo instance.
@@ -153,6 +154,12 @@ func NewRouter(
 	crl := admin.Group("/crl")
 	crl.GET("/revoked", func(c echo.Context) error { return ac.CRL.GetRevokedCerts(c) })
 	crl.GET("/generate", func(c echo.Context) error { return ac.CRL.GenerateCRL(c) })
+
+	// ═══════════════════════════════════════════════════════════════════
+	// AUDIT LOG ROUTES — Admin only
+	// ═══════════════════════════════════════════════════════════════════
+	auditLogs := admin.Group("/audit-logs")
+	auditLogs.GET("", func(c echo.Context) error { return ac.AuditLog.GetAuditLogs(c) })
 
 	// Customer revocation requests
 	custRev := customer.Group("/revocations")
